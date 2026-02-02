@@ -96,7 +96,7 @@ The result is **low-latency, stable, product-grade pointer control** suitable fo
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/aerocursor.git
+git clone https://github.com/kaganakcelik/aerocursor.git
 cd aerocursor
 ```
 
