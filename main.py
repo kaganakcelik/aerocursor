@@ -7,6 +7,7 @@ import pyautogui
 import numpy as np
 import Quartz # For smooth dragging on Mac
 
+
 # --- Configuration ---
 pyautogui.FAILSAFE = True  # Drag mouse to corner to kill script
 pyautogui.PAUSE = 0        # maximize speed
@@ -26,17 +27,16 @@ SCREEN_MARGIN_Y = 0.2
 # 60fps / 12 = 5 steps to close gap? No, 1/12th decay.
 # If we run 3x faster, we need 3x the divisor to have same decay profile per second.
 # Let's try 20.0 to be safe against jitter.
-SMOOTHING_FACTOR_BASE = 10.0
+SMOOTHING_FACTOR_BASE = 15.0
 MIN_STEP = 0.0001
 # Deadband: Increase slightly to ignore hand tremors
-JITTER_THRESHOLD = 0.004 # Normalized distance (0.4% of screen diagonal)
+JITTER_THRESHOLD = 0.005 # Normalized distance (0.5% of screen diagonal)
 
 # Gestures
 CLICK_THRESHOLD_RATIO = 0.2  # Distance / HandSize
 SCROLL_THRESHOLD_RATIO = 0.2
-CURSOR_ACTIVATION_THRESHOLD_RATIO = 0.6 # Distance / HandSize to enable cursor movement
 SCROLL_SPEED_MULTIPLIER = 0.03 # Sensitivity (applied before internal scaling)
-DRAG_DELAY = 0.4              # Seconds to wait before dragging
+DRAG_DELAY = 0.2              # Seconds to wait before dragging
 
 # Landmarks
 WRIST = 0
@@ -65,6 +65,9 @@ class CursorController:
         self.thread.start()
 
     def set_dragging(self, dragging):
+        """
+        Updates dragging state to switch between move and drag events.
+        """
         self.is_dragging = dragging
 
     def update_target(self, norm_x, norm_y):
@@ -138,11 +141,12 @@ class CursorController:
             try:
                 if self.is_dragging:
                     # Use Quartz for smooth dragging on Mac
-                    # pyautogui.moveTo often fails to generate correct drag events
+                    # Explicitly cast to int for CGPoint
+                    loc = (int(self.current_x), int(self.current_y))
                     ev = Quartz.CGEventCreateMouseEvent(
                         None, 
                         Quartz.kCGEventLeftMouseDragged, 
-                        (self.current_x, self.current_y), 
+                        loc, 
                         Quartz.kCGMouseButtonLeft
                     )
                     Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
@@ -315,7 +319,7 @@ def main():
     # Initialize components
     cursor = CursorController()
     scroll = ScrollController() # New dedicated controller
-    gestures = GestureDetector(scroll, cursor) # Updated signature
+    gestures = GestureDetector(scroll, cursor)
     
     # Initialize MediaPipe
     options = HandLandmarkerOptions(
@@ -349,22 +353,9 @@ def main():
                 if result.hand_landmarks:
                     hand_lms = result.hand_landmarks[0] 
                     
-                    # 1. Cursor Movement (Gated by Pinch Distance)
-                    # User: "cursor only gets activated when my finger and thumb are within a certain distance"
-                    idx = hand_lms[INDEX_TIP]
-                    thm = hand_lms[THUMB_TIP]
-                    cursor_pinch_dist = math.hypot(idx.x - thm.x, idx.y - thm.y)
-                    
-                    # Calculate Hand Size for adaptive threshold
-                    w = hand_lms[WRIST]
-                    m_mcp = hand_lms[MIDDLE_MCP]
-                    eff_hand_size = math.hypot(w.x - m_mcp.x, w.y - m_mcp.y)
-                    
-                    if eff_hand_size > 0.01:
-                        activation_thresh = CURSOR_ACTIVATION_THRESHOLD_RATIO * eff_hand_size
-                        if cursor_pinch_dist < activation_thresh:
-                            ring_mcp = hand_lms[RING_MCP]
-                            cursor.update_target(ring_mcp.x, ring_mcp.y)
+                    # 1. Cursor Movement
+                    ring_mcp = hand_lms[RING_MCP]
+                    cursor.update_target(ring_mcp.x, ring_mcp.y)
                     
                     # 2. Gestures
                     gestures.update(hand_lms)
@@ -373,13 +364,7 @@ def main():
                     h, w, _ = frame.shape
                     
                     cx, cy = int(hand_lms[RING_MCP].x * w), int(hand_lms[RING_MCP].y * h)
-                    
-                    # Visual feedback for activation
-                    color = (0, 0, 255) # Red = Stop
-                    if eff_hand_size > 0.01 and cursor_pinch_dist < (CURSOR_ACTIVATION_THRESHOLD_RATIO * eff_hand_size):
-                        color = (0, 255, 255) # Yellow = Active
-                        
-                    cv2.circle(frame, (cx, cy), 8, color, -1)
+                    cv2.circle(frame, (cx, cy), 8, (0, 255, 255), -1)
                     
                     if gestures.is_clicking:
                         cv2.putText(frame, "CLICK/DRAG", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
